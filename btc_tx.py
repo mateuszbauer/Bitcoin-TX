@@ -6,9 +6,7 @@ import qrcode
 import os, struct, time
 import socket
 
-TESTNET = int(os.getenv("TESTNET", 0))
 VERSION = 70002
-
 
 def dsha256(x):
 	return hashlib.sha256(hashlib.sha256(x).digest()).digest()
@@ -56,7 +54,7 @@ Assuming mainnet address and compressed public key:
 8. Convert the result from a byte string into a Base58 string using Base58Check encoding.
 '''
 def create_wallet_import_format(private_key):
-	netbyte = b'\xef' if TESTNET == 1 else b'\x80'
+	netbyte = b'\x80'
 	extended_key = b'\x01' + netbyte + private_key
 	checksum = dsha256(extended_key)[:4]
 	return base58.b58encode((extended_key + checksum))
@@ -65,7 +63,7 @@ def create_wallet_import_format(private_key):
 From https://en.bitcoin.it/wiki/Protocol_documentation#Addresses
 '''
 def generate_address(public_key):
-	version = b'\x6f' if TESTNET == 1 else b'\x00'
+	version = b'\x00'
 	key_hash = version + ripemd160(sha256(public_key))
 	checksum = dsha256(key_hash)[:4]
 	address = base58.b58encode(key_hash + checksum)
@@ -91,10 +89,18 @@ Field size | Description | Data type | Comment
 ?          | payload     | uchar[]   | Actual data
 -----------+-------------+-----------+----------------------------------------------------
 '''
-def make_message(command, payload):
-	magic = 0xDAB5BFFA if TESTNET == 1 else 0xD9B4BEF9
+def pack_message(command, payload):
+	magic = 0xD9B4BEF9
 	return struct.pack('<I12sI4s', magic, command.encode('ascii'),
 		len(payload), dsha256(payload)[:4]) + payload
+
+def recv_message(sock):
+	magic, command, length, checksum = struct.unpack('<I12sI4s', sock.recv(24))
+	payload = sock.recv(length)
+	assert magic == 0xD9B4BEF9
+	assert length == len(payload)
+	assert checksum == dsha256(payload)[:4]
+	return command.decode('ascii'), payload
 
 def prepare_version_msg():
 	version = VERSION   # 4 bytes
@@ -108,7 +114,11 @@ def prepare_version_msg():
 
 	payload = struct.pack('<IQQ26s26s8s1s4s', version, services, timestamp,
 		addr_recv, addr_from, nonce, user_agent, start_height)
-	return make_message('version', payload)
+	return pack_message('version', payload)
+
+def prepare_verack_msg():
+	return pack_message('verack', b'')
+
 
 def main():
 	sk = create_private_key()
@@ -122,11 +132,20 @@ def main():
 
 	msg = prepare_version_msg() 
 	hexdump(msg)
-
 	sock.send(msg)
-	ret = sock.recv(2000)
-	print("------ response ------")
-	hexdump(ret)
+
+	cmd, payload = recv_message(sock)
+	print(cmd)
+	hexdump(payload)
+
+	msg = prepare_verack_msg()
+	hexdump(msg)
+	sock.send(msg)
+
+	cmd, payload = recv_message(sock)
+	print(cmd)
+	hexdump(payload)
+
 
 if __name__ == '__main__':
 	main()
