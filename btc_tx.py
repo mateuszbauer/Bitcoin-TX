@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-import hashlib, base58, ecdsa
+import hashlib, base58, ecdsa, binascii
 from hexdump import hexdump
 import qrcode
 import os, struct, time
@@ -54,8 +54,7 @@ Assuming mainnet address and compressed public key:
 8. Convert the result from a byte string into a Base58 string using Base58Check encoding.
 '''
 def create_wallet_import_format(private_key):
-	netbyte = b'\x80'
-	extended_key = b'\x01' + netbyte + private_key
+	extended_key = b'\x80' + private_key + b'\x01'
 	checksum = dsha256(extended_key)[:4]
 	return base58.b58encode((extended_key + checksum))
 	
@@ -119,7 +118,6 @@ def prepare_version_msg():
 def prepare_verack_msg():
 	return pack_message('verack', b'')
 
-
 def main():
 	sk = create_private_key()
 	pk = create_public_key(sk)
@@ -128,7 +126,7 @@ def main():
 	generate_qrcode(addr, 'addr.png')
 
 	sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-	sock.connect(('91.206.17.195', 8333))
+	sock.connect(('13.53.236.175', 8333))
 
 	msg = prepare_version_msg() 
 	hexdump(msg)
