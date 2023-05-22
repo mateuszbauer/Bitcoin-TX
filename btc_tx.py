@@ -115,10 +115,46 @@ def prepare_version_msg():
 		addr_recv, addr_from, nonce, user_agent, start_height)
 	return pack_message('version', payload)
 
+def btc_to_satoshi(x):
+	return int(x * 1000000000)
+
 def prepare_verack_msg():
 	return pack_message('verack', b'')
 
+def sign_tx_msg(raw_tx, private_key):
+	pass
+
+def prepare_raw_tx(tx_hash_id, value, recv_addr):
+	# TODO: rewrite cause this looks bad
+	version = 1
+	tx_in_count = 1
+	tx_hash_id = binascii.unhexlify(tx_hash_id)
+	output_index = 0
+	sequence = b'\xff\xff\xff\xff'
+	tx_out_count = 1
+	value = btc_to_satoshi(value)
+	lock_time = b'\x00\x00\x00\x00'
+
+	scriptPubKey = b'\x76' + b'\xa9' + b'\x14' + base58.b58decode(recv_addr) + b'\x88' + b'\xac'
+	scriptSig = scriptPubKey
+
+	return struct.pack('<IB', version, tx_in_count) + tx_hash_id + \
+		struct.pack('<IB', output_index, len(scriptSig)) + scriptSig + \
+		sequence + struct.pack('<BQB', tx_out_count, value, len(scriptPubKey)) + \
+		scriptPubKey + lock_time
+
+def prepare_tx_msg(tx_hash_id, value, private_key, recv_addr):
+	raw_tx = prepare_raw_tx(tx_hash_id, value, recv_addr)
+	signed_tx = sign_tx_msg(raw_tx, private_key)
+
 def main():
+	sample_hash = "eccf7e3034189b851985d871f91384b8ee357cd47c3024736e5676eb2debb3f2"
+	value = 0.9999
+	addr = "1KZ51E55Q7z4DANd74mj4xu4rnBfW5FyzY"
+	raw_tx = prepare_raw_tx(sample_hash, value, addr)
+	hexdump(raw_tx)
+
+	'''
 	sk = create_private_key()
 	pk = create_public_key(sk)
 	wif = create_wallet_import_format(sk)
@@ -143,6 +179,7 @@ def main():
 	cmd, payload = recv_message(sock)
 	print(cmd)
 	hexdump(payload)
+	'''
 
 
 if __name__ == '__main__':
