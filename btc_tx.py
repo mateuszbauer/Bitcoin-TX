@@ -9,6 +9,19 @@ import socket
 VERSION = 70002
 MAGIC = 0xD9B4BEF9
 
+def varint(x):
+	if x < 0xfd:
+		return struct.pack('<B', x)
+	elif x < 0xffff:
+		return struct.pack('cH', '\xfd', x)
+	elif x < 0xffffffff:
+		return struct.pack('cL', '\xfe', x)
+	else:
+		return struct.pack('cQ', '\xff', x)
+
+def varstr(s):
+	return varint(len(s)) + s
+
 def dsha256(x):
 	return hashlib.sha256(hashlib.sha256(x).digest()).digest()
 
@@ -95,7 +108,7 @@ def prepare_verack_msg():
 	'''
 	return pack_message('verack', b'')
 
-def prepare_raw_tx(tx_hash_id, value, recv_addr):
+def prepare_raw_tx(tx_hash_id, value, recv_addr, _scriptSig=None):
 	'''
 	https://en.bitcoin.it/wiki/Protocol_documentation#tx
 	'''
@@ -109,52 +122,35 @@ def prepare_raw_tx(tx_hash_id, value, recv_addr):
 	value = btc_to_satoshi(value)
 	lock_time = b'\x00\x00\x00\x00'
 	scriptPubKey = b'\x76' + b'\xa9' + b'\x14' + base58.b58decode(recv_addr) + b'\x88' + b'\xac'
-	scriptSig = scriptPubKey
+	scriptSig = scriptPubKey if _scriptSig is None else _scriptSig
+	hash_code_type = b'\x41\x00\x00\x00'
 	return struct.pack('<IB32sIB', version, tx_in_count, tx_hash_id, output_index, len(scriptSig)) + \
 		scriptSig + struct.pack('<4sBQB', sequence, tx_out_count, value, len(scriptPubKey)) + \
-		scriptPubKey + lock_time
+		scriptPubKey + lock_time + hash_code_type
 
-def sign_tx_msg(raw_tx, private_key):
-	pass
+def sign_tx_msg(tx_hash_id, value, recv_addr, raw_tx, private_key):
+	dsha_raw_tx = dsha256(raw_tx)
+	sk = ecdsa.SigningKey.from_string(private_key, curve=ecdsa.SECP256k1)
+	vk = sk.get_verifying_key()
+	sig = sk.sign(dsha_raw_tx)
+	assert vk.verify(sig, dsha_raw_tx)
+	sig += b'\x41'
+	scriptSig = varstr(sig) + varstr(vk.to_string())
+	return prepare_raw_tx(tx_hash_id, value, recv_addr, scriptSig)[:-4]
 
 def prepare_tx_msg(tx_hash_id, value, private_key, recv_addr):
 	raw_tx = prepare_raw_tx(tx_hash_id, value, recv_addr)
-	signed_tx = sign_tx_msg(raw_tx, private_key)
-	return signed_tx
+	signed_tx = sign_tx_msg(tx_hash_id, value, recv_addr, raw_tx, private_key)
+	return pack_message('tx', signed_tx)
 
 def main():
+	priv_key = create_private_key()
+	publ_key = create_public_key(priv_key)
 	value = 0.9999
 	sample_hash = "81b4c832d70cb56ff957589752eb4125a4cab78a25a8fc52d6a09e5bd4404d48"
-	addr = "1KZ51E55Q7z4DANd74mj4xu4rnBfW5FyzY"
-	raw_tx = prepare_raw_tx(sample_hash, value, addr)
-	hexdump(raw_tx)
-
-	'''
-	sk = create_private_key()
-	pk = create_public_key(sk)
-	wif = create_wallet_import_format(sk)
-	addr = generate_address(pk)
-	generate_qrcode(addr, 'addr.png')
-
-	sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-	sock.connect(('13.53.236.175', 8333))
-
-	msg = prepare_version_msg() 
-	hexdump(msg)
-	sock.send(msg)
-
-	cmd, payload = recv_message(sock)
-	print(cmd)
-	hexdump(payload)
-
-	msg = prepare_verack_msg()
-	hexdump(msg)
-	sock.send(msg)
-
-	cmd, payload = recv_message(sock)
-	print(cmd)
-	hexdump(payload)
-	'''
+	addr = generate_address(publ_key)
+	tx_msg = prepare_tx_msg(sample_hash, value, priv_key, addr)
+	hexdump(tx_msg)
 
 if __name__ == '__main__':
 	main()
